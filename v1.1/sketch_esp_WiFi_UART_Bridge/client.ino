@@ -1,10 +1,3 @@
-// ESP8266 WiFi <-> UART Bridge
-// by RoboRemo
-// www.roboremo.com
-
-// Disclaimer: Don't use RoboRemo for life support systems
-// or any other situations where system failure may affect
-// user or environmental safety.
 
 #include <ESP8266WiFi.h>
 
@@ -21,6 +14,9 @@
 #define PROTOCOL_TCP
 //#define PROTOCOL_UDP
 
+#define TCP_CLIENT //client mode
+
+//#define TCP_SERVER //server mode
 
 #ifdef MODE_AP
 // For AP mode:
@@ -28,7 +24,7 @@ const char *ssid = "mywifi";  // You will connect your phone to this Access Poin
 const char *pw = "qwerty123"; // and this is the password
 IPAddress ip(192, 168, 0, 1); // From RoboRemo app, connect to this IP
 IPAddress netmask(255, 255, 255, 0);
-const int port = 9876; // and this port
+const int port = 8266; // and this port
 // You must connect the phone to this AP, then:
 // menu -> connect -> Internet(TCP) -> 192.168.0.1:9876
 #endif
@@ -36,18 +32,17 @@ const int port = 9876; // and this port
 
 #ifdef MODE_STA
 // For STATION mode:
-const char *ssid = "myrouter";  // Your ROUTER SSID
-const char *pw = "password"; // and WiFi PASSWORD
-const int port = 9876;
+const char *ssid = "ESP8266WIFI";  // Your ROUTER SSID
+const char *pw = "12345678"; // and WiFi PASSWORD
+const uint16_t port = 8266;
+const char* host = "192.168.0.159";
 // You must connect the phone to the same router,
 // Then somehow find the IP that the ESP got from router, then:
 // menu -> connect -> Internet(TCP) -> [ESP_IP]:9876
 #endif
 
+
 //////////////////////////////////////////////////////////////////////////
-
-
-
 
 #ifdef PROTOCOL_TCP
 #include <WiFiClient.h>
@@ -91,25 +86,38 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pw);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(100);
+    delay(500);
+    Serial.print(".");
   }
   #endif
 
   #ifdef PROTOCOL_TCP
+  #ifdef TCP_SERVER
   Serial.println("Starting TCP Server");
   server.begin(); // start TCP server 
+  #endif
+  #ifdef TCP_CLIENT
+  Serial.println("Starting TCP Client");
+  #endif
+  
   #endif
 
   #ifdef PROTOCOL_UDP
   Serial.println("Starting UDP Server");
   udp.begin(port); // start UDP server 
   #endif
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
 }
 
 
 void loop() {
 
   #ifdef PROTOCOL_TCP
+  #ifdef TCP_SERVER
   if(!client.connected()) { // if client not connected
     client = server.available(); // wait for it to connect
     return;
@@ -119,11 +127,12 @@ void loop() {
 
   if(client.available()) {
     while(client.available()) {
-      buf1[i1] = (uint8_t)client.read(); // read char from client (RoboRemo app)
+      buf1[i1] = (uint8_t)client.read(); // read char from client
       if(i1<bufferSize-1) i1++;
     }
     // now send to UART:
     Serial.write(buf1, i1);
+    
     i1 = 0;
   }
 
@@ -148,6 +157,49 @@ void loop() {
     client.write((char*)buf2, i2);
     i2 = 0;
   }
+  #endif
+  #ifdef TCP_CLIENT
+  if (!client.connect(host, port)) {
+    Serial.println("connection failed");
+    delay(5000);
+    return;
+  }
+  // wait for data to be available
+  unsigned long timeout = millis();
+  while (client.available() == 0) {
+    if(Serial.available())
+      break;
+  }
+  if(client.available()) {
+    while(client.available()) {
+      buf1[i1] = (uint8_t)client.read(); // read char from client (RoboRemo app)
+      if(i1<bufferSize-1) i1++;
+    }
+    // now send to UART:
+    Serial.write(buf1, i1);
+    
+    i1 = 0;
+  }
+  if(Serial.available()) {
+    // read the data until pause:
+    while(1) {
+      if(Serial.available()) {
+        buf2[i2] = (char)Serial.read(); // read char from UART
+        if(i2<bufferSize-1) i2++;
+      } else {
+        //delayMicroseconds(packTimeoutMicros);
+        delay(packTimeout);
+        if(!Serial.available()) {
+          break;
+        }
+      }
+    }
+    
+    // now send to WiFi:
+    client.write((char*)buf2, i2);
+    i2 = 0;
+  }
+  #endif
   #endif
 
 
